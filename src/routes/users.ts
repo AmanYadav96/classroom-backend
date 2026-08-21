@@ -1,6 +1,7 @@
 import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 import express from "express";
 import { user } from "../db/schema/index.js";
+import { requireAuth } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 
 const router = express.Router();
@@ -70,6 +71,76 @@ router.get("/", async (req, res) => {
     } catch (error) {
         console.error("Error fetching users:", error);
         res.status(500).json({ error: "Failed to get users" });
+    }
+});
+
+router.post("/", requireAuth(["admin"]), async (req, res) => {
+    try {
+        const { name, email, role, image, emailVerified } = req.body;
+        
+        const [createdUser] = await db
+            .insert(user)
+            .values({
+                id: typeof crypto !== "undefined" ? crypto.randomUUID() : `${Date.now()}`,
+                name,
+                email,
+                emailVerified: Boolean(emailVerified),
+                role: role ?? "student",
+                image,
+            })
+            .returning();
+            
+        if (!createdUser) throw Error;
+        res.status(200).json({ data: createdUser });
+    } catch (e) {
+        console.error(`POST / Users error ${e}`);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+router.get('/:id', async (req, res) => {
+    const userId = req.params.id;
+
+    if (!userId) return res.status(400).json({ error: 'Invalid ID' });
+
+    const [userDetails] = await db
+        .select()
+        .from(user)
+        .where(eq(user.id, userId as string));
+
+    if (!userDetails) return res.status(404).json({ error: 'No User Found' });
+    res.status(200).json({ data: userDetails });
+});
+
+router.patch('/:id', requireAuth(["admin","teacher"]), async (req, res) => {
+    try {
+        const userId = req.params.id;
+        if (!userId) return res.status(400).json({ error: 'Invalid ID' });
+
+        const [updatedUser] = await db
+            .update(user)
+            .set({ ...req.body, updatedAt: new Date() })
+            .where(eq(user.id, sql`${userId}`))
+            .returning();
+            
+        if (!updatedUser) return res.status(404).json({ error: 'User not found' });
+        res.status(200).json({ data: updatedUser });
+    } catch (e) {
+        console.error(`PATCH / Users error ${e}`);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+router.delete('/:id', requireAuth(["admin"]), async (req, res) => {
+    try {
+        const userId = req.params.id;
+        if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'Invalid ID' });
+
+        await db.delete(user).where(eq(user.id, userId as string));
+        res.status(200).json({ success: true });
+    } catch (e) {
+        console.error(`DELETE / Users error ${e}`);
+        res.status(500).json({ error: "Internal Server Error" });
     }
 });
 
